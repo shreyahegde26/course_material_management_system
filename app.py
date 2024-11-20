@@ -547,6 +547,72 @@ def show_course_materials():
 # def show_chat():
 #     st.subheader("Chat Forum")
 #     st.write("Chat functionality to be implemented")
+        
+def get_students_with_submissions(course_id):
+    conn = get_db_connection()
+    if not conn:
+        return []
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        query = """
+        SELECT s.srn, u.name
+        FROM students s
+        JOIN users u ON s.srn = u.user_id
+        WHERE s.srn IN (
+            SELECT asg.student_id
+            FROM assignment_submissions asg
+            JOIN assignments a ON asg.assignment_id = a.assignment_id
+            WHERE a.course_id = %s
+        )
+        """
+        cursor.execute(query, (course_id,))
+        results = cursor.fetchall()
+        return results
+    except Error as e:
+        st.error(f"Error retrieving students with submissions: {e}")
+        return []
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+def show_students_with_submissions():
+    st.subheader("Students with Assignment Submissions")
+
+    # Fetch all courses
+    conn = get_db_connection()
+    if not conn:
+        return
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT course_id, course_name FROM courses")
+        courses = cursor.fetchall()
+    except Error as e:
+        st.error(f"Error fetching courses: {e}")
+        return
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+    # Create a dropdown to select the course
+    course_options = {f"{course['course_name']} ({course['course_id']})": course['course_id'] for course in courses}
+    selected_course = st.selectbox("Select a course", list(course_options.keys()))
+
+    if selected_course:
+        course_id = course_options[selected_course]
+        students = get_students_with_submissions(course_id)
+
+        if students:
+            st.write(f"Students who have submitted assignments for {selected_course}:")
+            for student in students:
+                st.write(f"- {student['name']} (SRN: {student['srn']})")
+        else:
+            st.write("No students have submitted assignments for this course yet.")
 
 def view_and_grade_assignments():
     st.subheader("View and Grade Assignments")
@@ -688,12 +754,13 @@ def update_grade_and_feedback(submission_id: int, grade: float, feedback: str):
 def show_faculty_dashboard():
     st.header("Faculty Dashboard")
     
-    tab1, tab2, tab3, tab4, tab5= st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "Upload Material",
         "Upload Assignment",
         "View Students",
         "Grade Assignments",
         "View All Submissions",
+        "Students with Submissions"  # New tab
     ])
     
     with tab1:
@@ -710,6 +777,9 @@ def show_faculty_dashboard():
     
     with tab5:
         view_all_submissions()
+    
+    with tab6:
+        show_students_with_submissions()  # New function call
     
 
 def view_all_submissions():
@@ -907,7 +977,6 @@ def upload_assignment():
             cursor.close()
             conn.close()
 
-
 def show_notifications():
     st.subheader("Notifications")
     
@@ -919,7 +988,7 @@ def show_notifications():
     try:
         cursor = conn.cursor(dictionary=True)
         cursor.execute("""
-            SELECT message, created_at, is_read
+            SELECT notification_id, message, created_at, is_read
             FROM notifications
             WHERE user_id = %s
             ORDER BY created_at DESC
@@ -930,11 +999,14 @@ def show_notifications():
             st.info("No notifications.")
         else:
             for notification in notifications:
+                # Ensure the key is unique by using notification_id
+                unique_key = f"mark_read_{notification['notification_id']}"
+                
                 with st.expander(f"Notification from {notification['created_at']}"):
                     st.write(notification['message'])
                     if not notification['is_read']:
-                        if st.button("Mark as Read", key=f"mark_read_{notification['created_at']}"):
-                            mark_notification_as_read(notification['created_at'])
+                        if st.button("Mark as Read", key=unique_key):
+                            mark_notification_as_read(notification['notification_id'])
                             st.rerun()
 
     except Error as e:
@@ -945,7 +1017,7 @@ def show_notifications():
         if conn:
             conn.close()
 
-def mark_notification_as_read(created_at):
+def mark_notification_as_read(notification_id):
     conn = get_db_connection()
     if not conn:
         return
@@ -955,14 +1027,17 @@ def mark_notification_as_read(created_at):
         cursor.execute("""
             UPDATE notifications
             SET is_read = TRUE
-            WHERE user_id = %s AND created_at = %s
-        """, (st.session_state.user['user_id'], created_at))
+            WHERE user_id = %s AND notification_id = %s
+        """, (st.session_state.user['user_id'], notification_id))
         conn.commit()
     except Error as e:
         st.error(f"Error marking notification as read: {e}")
     finally:
-        cursor.close()
-        conn.close()
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
 
 def view_enrolled_students():
     st.subheader("Enrolled Students and Assignments")
