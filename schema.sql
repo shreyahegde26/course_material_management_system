@@ -136,8 +136,31 @@ ALTER TABLE student_courses ADD FOREIGN KEY (faculty_id) REFERENCES users(user_i
 
 
 
+DELIMITER //
 
---  
+CREATE TRIGGER after_assignment_insert
+AFTER INSERT ON assignments
+FOR EACH ROW
+BEGIN
+    INSERT INTO notifications (user_id, message)
+    SELECT sc.srn, CONCAT('New assignment "', NEW.title, '" has been uploaded for ', c.course_name, '. Deadline: ', NEW.deadline)
+    FROM student_courses sc
+    JOIN courses c ON sc.course_id = c.course_id
+    WHERE sc.course_id = NEW.course_id;
+END//
+
+DELIMITER ;
 
 
 
+DELIMITER //
+CREATE PROCEDURE AddCourse(
+IN p_course_id VARCHAR(20),
+IN p_course_name VARCHAR(100),
+IN p_faculty_id VARCHAR(50)
+)
+BEGIN
+INSERT INTO courses (course_id, course_name, faculty_id)
+VALUES (p_course_id, p_course_name, p_faculty_id);
+END //
+DELIMITER ;
